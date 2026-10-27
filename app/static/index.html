@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hi3D Studio</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/build/three.module.js",
+  "three/addons/": "./vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <div class="brand"><img src="icon.svg" alt=""><span>Hi3D Studio</span></div>
+  <label class="gpu-pick" title="GPU used for the next job">GPU
+    <select id="gpu-select"></select>
+  </label>
+  <div id="gpu" class="gpu">—</div>
+  <div class="engines"><span id="eng-trellis" class="pill">TRELLIS.2</span><span id="eng-hi3d" class="pill">Hi3D</span></div>
+  <button id="quit" class="ghost" title="Stop the local server">Quit</button>
+</header>
+
+<main>
+  <aside id="panel">
+    <section>
+      <h2>Reference views <span class="hint" id="view-count">0 / 8</span></h2>
+      <div id="drop" class="drop" tabindex="0">
+        <p><b>Drop images</b> or click — one for single view, 2–8 for multi-view.<br>
+        <span class="hint">Front view first (★). Same object, same lighting, ~45–90° apart.</span></p>
+        <input id="file" type="file" accept="image/*" multiple hidden>
+      </div>
+      <div id="thumbs" class="thumbs"></div>
+    </section>
+
+    <section>
+      <h2>1 · Coarse shape <span class="hint">TRELLIS.2</span></h2>
+      <label>Source
+        <select id="coarse_mode">
+          <option value="single">Single image (front)</option>
+          <option value="multidiffusion">Multi-view · multidiffusion (averaged)</option>
+          <option value="stochastic">Multi-view · stochastic (alternating)</option>
+          <option value="upload">Use my own coarse mesh</option>
+        </select>
+      </label>
+      <div id="coarse-upload" class="hidden">
+        <label>Coarse mesh (.glb/.obj/.ply)<input id="coarse_file" type="file" accept=".glb,.gltf,.obj,.ply,.stl"></label>
+      </div>
+      <div class="row">
+        <label>Resolution<select id="coarse_res"><option>512</option><option selected>1024</option><option>1536</option></select></label>
+        <label>Background<select id="bg_removal"><option value="auto">Auto</option><option value="birefnet">BiRefNet</option><option value="threshold">Threshold</option></select></label>
+      </div>
+      <p class="note" id="mv-note">Multi-view TRELLIS.2 is experimental upstream (pixal3d.cpp PR #71).</p>
+    </section>
+
+    <section>
+      <h2>2 · Hi3D refine <label class="switch" title="Off: stop after TRELLIS. You can refine any result later from History."><input id="refine" type="checkbox" checked><span></span></label></h2>
+      <p class="hint" id="refine-later" style="margin:0 0 8px">Off: stop after TRELLIS, check the result, then refine it below if it's worth it.</p>
+      <button id="refine_sel" class="ghost" style="width:100%;margin-bottom:10px" disabled title="Run Hi3D on the selected History result's TRELLIS mesh, with the settings below">Refine selected result with Hi3D</button>
+      <div id="refine-opts">
+        <div class="row">
+          <label>Detail<select id="hi3d_res"><option value="512">512³ · 1 pass</option><option value="1024" selected>1024³ · 2 passes</option><option value="1536">1536³ · 3 passes</option></select></label>
+          <label>Steps/pass<input id="steps" type="number" min="5" max="60" value="25"></label>
+        </div>
+        <label>View grounding
+          <select id="fusion">
+            <option value="front">Front view only (as trained)</option>
+            <option value="multidiffusion">All views · multidiffusion (experimental)</option>
+            <option value="stochastic">All views · stochastic (experimental)</option>
+          </select>
+        </label>
+        <label id="fw-row" class="hidden">Front-view weight <output id="fw-out">2.0×</output>
+          <input id="front_weight" type="range" min="1" max="6" step="0.5" value="2">
+        </label>
+        <div class="row">
+          <label>Cut-out<select id="remove_bg"><option value="auto">If no alpha</option><option value="always">Always</option><option value="never">Never</option></select></label>
+          <label>Seed<input id="seed" type="number" value="0"></label>
+        </div>
+        <label class="check" title="Hi3D rebuilds thin sheets (cloth, feathers, fins) poorly; restore those regions from the TRELLIS mesh"><input id="hybrid" type="checkbox" checked> Keep TRELLIS geometry where Hi3D loses thin parts</label>
+        <label class="check"><input id="colour" type="checkbox" checked> Carry TRELLIS colours onto refined mesh</label>
+        <label class="check" title="Unwrap the final mesh and bake TRELLIS's 3D PBR field onto it (albedo + metal/rough)"><input id="texture" type="checkbox" checked> Bake TRELLIS PBR texture (UV + maps)</label>
+        <div class="row" id="tex-opts">
+          <label>Texture mesh faces<select id="tex_faces"><option value="100000">100k</option><option value="300000" selected>300k</option><option value="600000">600k</option><option value="0">Full (slow)</option></select></label>
+          <label>Atlas<select id="atlas"><option>2048</option><option>4096</option></select></label>
+        </div>
+        <label class="check"><input id="offload" type="checkbox"> CPU offload (slower, less VRAM)</label>
+        <label class="check" title="Decode with Hi3D's pure-PyTorch sparse convolutions instead of the cu128 spconv kernels"><input id="torch_conv" type="checkbox"> Safe decode (PyTorch convolutions)</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>3 · Placement <span class="hint">for part-by-part builds</span></h2>
+      <label>Fit result to proxy part (optional)
+        <input id="fit_file" type="file" accept=".glb,.gltf,.obj,.ply,.stl">
+      </label>
+      <p class="hint" style="margin:4px 0 0">Export the matching region of your whole-body proxy from Blender (world space).
+        Outputs <code>*_aligned.glb</code> already positioned on the proxy. Without it, results are placed back in the coarse mesh's frame.</p>
+    </section>
+
+    <section id="post-panel">
+      <h2>4 · Post-process <span class="hint">selected result · CPU</span></h2>
+      <div class="row">
+        <label>Decimate<select id="pp_decimate"><option value="0">Off</option><option value="30000">30k</option><option value="60000">60k</option><option value="150000">150k</option><option value="300000">300k</option></select></label>
+        <label>Texture<select id="pp_texture"><option value="1">Bake</option><option value="0">Skip</option></select></label>
+      </div>
+      <div class="row">
+        <label>Texture faces<select id="pp_tex_faces"><option value="100000">100k</option><option value="300000" selected>300k</option><option value="0">Full</option></select></label>
+        <label>Atlas<select id="pp_atlas"><option>2048</option><option>4096</option></select></label>
+      </div>
+      <button id="pp_run" class="ghost" style="width:100%">Run on selected result</button>
+    </section>
+
+    <div class="actions">
+      <button id="run" class="primary">Generate</button>
+      <button id="cancel" class="ghost hidden">Cancel</button>
+    </div>
+    <div id="progress" class="progress hidden">
+      <div class="bar"><div id="bar-fill"></div></div>
+      <div id="prog-msg" class="msg"></div>
+    </div>
+  </aside>
+
+  <section id="viewer-wrap">
+    <div class="toolbar">
+      <div class="seg" id="layout">
+        <button data-v="quad" class="on" title="Front / Right / Back / Top">Quad</button>
+        <button data-v="single" title="Free orbit">Orbit</button>
+        <button data-v="compare" title="Split compare coarse vs refined">Compare</button>
+      </div>
+      <div class="seg" id="model">
+        <button data-v="coarse">Coarse</button>
+        <button data-v="refined" class="on">Refined</button>
+        <button data-v="refined_aligned" title="Pure Hi3D geometry in the coarse/proxy frame">Placed</button>
+        <button data-v="refined_hybrid" title="Hi3D body + TRELLIS thin parts (cloth, feathers)">Hybrid</button>
+        <button data-v="textured" title="Final mesh with UVs + baked TRELLIS PBR texture">Textured</button>
+        <button data-v="refined_coloured">Coloured</button>
+      </div>
+      <div class="seg" id="shade">
+        <button data-v="clay" class="on">Clay</button>
+        <button data-v="normals">Normals</button>
+        <button data-v="color">Colour</button>
+        <button data-v="wire">Wire</button>
+      </div>
+      <span class="spacer"></span>
+      <span id="stats" class="stats"></span>
+      <a id="dl" class="ghost btn hidden" download>Download</a>
+      <details id="files" class="files hidden"><summary class="ghost btn">All files</summary><div id="file-list"></div></details>
+    </div>
+    <div id="viewer"><div id="labels"></div><div id="empty" class="empty">Generate or pick a result from history.</div></div>
+    <details id="logbox"><summary>Log</summary><pre id="log"></pre></details>
+  </section>
+
+  <aside id="history">
+    <h2>History</h2>
+    <div id="jobs"></div>
+  </aside>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
