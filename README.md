@@ -41,7 +41,7 @@ Built and tested on an **RTX 5070 Ti (Blackwell, sm_120, 16 GB)**; the stack is 
 
 1. **Clone this repository**
    ```bash
-   git clone https://github.com/<you>/hi3d-studio.git
+   git clone https://github.com/Sumane/hi3d-studio.git
    cd hi3d-studio
    ```
 2. **Get the Hi3D v1.0 source** from its official release and unpack it anywhere. The installer copies it into `src/hi3d` (git-ignored).
